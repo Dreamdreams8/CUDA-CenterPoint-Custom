@@ -61,7 +61,8 @@ class CenterPointVoxelNet_Post(nn.Module):
     def __init__(self, model):
         super(CenterPointVoxelNet_Post, self).__init__()
         self.model = model
-        assert( len(self.model.bbox_head.tasks) == 6 )
+        assert( len(self.model.bbox_head.tasks) == 2 )
+        print("len(self.model.bbox_head.tasks) = ", len(self.model.bbox_head.tasks) )
 
     def forward(self, x):
         x = self.model.neck(x)
@@ -70,11 +71,11 @@ class CenterPointVoxelNet_Post(nn.Module):
         pred = [ task(x) for task in self.model.bbox_head.tasks ]
 
         return pred[0]['reg'], pred[0]['height'], pred[0]['dim'], pred[0]['rot'], pred[0]['vel'], pred[0]['hm'], \
-        pred[1]['reg'], pred[1]['height'], pred[1]['dim'], pred[1]['rot'], pred[1]['vel'], pred[1]['hm'], \
-        pred[2]['reg'], pred[2]['height'], pred[2]['dim'], pred[2]['rot'], pred[2]['vel'], pred[2]['hm'], \
-        pred[3]['reg'], pred[3]['height'], pred[3]['dim'], pred[3]['rot'], pred[3]['vel'], pred[3]['hm'], \
-        pred[4]['reg'], pred[4]['height'], pred[4]['dim'], pred[4]['rot'], pred[4]['vel'], pred[4]['hm'], \
-        pred[5]['reg'], pred[5]['height'], pred[5]['dim'], pred[5]['rot'], pred[5]['vel'], pred[5]['hm']
+        pred[1]['reg'], pred[1]['height'], pred[1]['dim'], pred[1]['rot'], pred[1]['vel'], pred[1]['hm']
+        # pred[2]['reg'], pred[2]['height'], pred[2]['dim'], pred[2]['rot'], pred[2]['vel'], pred[2]['hm'], \
+        # pred[3]['reg'], pred[3]['height'], pred[3]['dim'], pred[3]['rot'], pred[3]['vel'], pred[3]['hm'], \
+        # pred[4]['reg'], pred[4]['height'], pred[4]['dim'], pred[4]['rot'], pred[4]['vel'], pred[4]['hm'], \
+        # pred[5]['reg'], pred[5]['height'], pred[5]['dim'], pred[5]['rot'], pred[5]['vel'], pred[5]['hm']
 
 def predict(reg, hei, dim, rot, vel, hm, test_cfg):
     """decode, nms, then return the detection result.
@@ -158,6 +159,7 @@ def main(args):
     # Get 1 frame data as model.reader input
     example = dict()
     test_pkl = 'data/pkl/nusc_test_in.pkl'
+    # test_pkl = 'data/custom_0411_zzg/infos_val_01sweeps_withvelo_filter_True.pkl'
     gt_pkl = 'data/pkl/nusc_gt_out_fp32.pkl'
     if args.half:
         gt_pkl = 'data/pkl/nusc_gt_out_fp16.pkl'
@@ -180,9 +182,9 @@ def main(args):
         example = example_to_device(data_batch, torch.device("cuda"), non_blocking=False)
         with open(test_pkl, 'wb') as handle:
             pickle.dump(example, handle)
-
+    # print("++++++++: ", len(example))
     assert(len(example.keys()) > 0)
-    print("Token: ", example["metadata"][0]["token"])
+    # print("Token: ", example[0].keys())
     assert(len(example["points"]) == 1)
 
     model = build_detector(cfg.model, train_cfg=None, test_cfg=cfg.test_cfg)
@@ -226,11 +228,13 @@ def main(args):
             export_params=True, opset_version=11, do_constant_folding=True,
             keep_initializers_as_inputs=False, input_names = ['input'],
             output_names = ['reg_0', 'height_0', 'dim_0', 'rot_0', 'vel_0', 'hm_0',
-                            'reg_1', 'height_1', 'dim_1', 'rot_1', 'vel_1', 'hm_1',
-                            'reg_2', 'height_2', 'dim_2', 'rot_2', 'vel_2', 'hm_2',
-                            'reg_3', 'height_3', 'dim_3', 'rot_3', 'vel_3', 'hm_3',
-                            'reg_4', 'height_4', 'dim_4', 'rot_4', 'vel_4', 'hm_4',
-                            'reg_5', 'height_5', 'dim_5', 'rot_5', 'vel_5', 'hm_5'],
+                            'reg_1', 'height_1', 'dim_1', 'rot_1', 'vel_1', 'hm_1'],
+            # output_names = ['reg_0', 'height_0', 'dim_0', 'rot_0', 'vel_0', 'hm_0',
+            #                 'reg_1', 'height_1', 'dim_1', 'rot_1', 'vel_1', 'hm_1',
+            #                 'reg_2', 'height_2', 'dim_2', 'rot_2', 'vel_2', 'hm_2',
+            #                 'reg_3', 'height_3', 'dim_3', 'rot_3', 'vel_3', 'hm_3',
+            #                 'reg_4', 'height_4', 'dim_4', 'rot_4', 'vel_4', 'hm_4',
+            #                 'reg_5', 'height_5', 'dim_5', 'rot_5', 'vel_5', 'hm_5'],                            
             )
 
         sim_model, check = simplify_model("tmp.onnx")
@@ -246,9 +250,10 @@ def main(args):
             box3d_lidar = torch.tensor([])
             scores = torch.tensor([])
             label_preds = torch.tensor([])
-            cls_nums = [0,1,3,5,6,8]
+            # cls_nums = [0,1,3,5,6,8]
+            cls_nums = [0,1]
 
-            for i in range(0, 6):
+            for i in range(0, len(cls_nums)):
                 [reg, height, dim, rot, vel, hm] = post_model(x)[i * 6 : (i + 1) * 6]
                 gt_output = predict(reg, height, dim, rot, vel, hm, cfg.test_cfg)
                 box3d_lidar = torch.cat((box3d_lidar, gt_output['box3d_lidar'].cpu()), axis = 0)
@@ -285,7 +290,7 @@ def main(args):
             x = model.neck(x)
             preds, _ = model.bbox_head(x)
 
-            assert(len(preds) == 6)
+            assert(len(preds) == 2)
 
             gt_output = model.bbox_head.predict(example, preds, cfg.test_cfg)
             with open(gt_pkl, 'wb') as handle:
